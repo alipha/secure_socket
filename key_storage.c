@@ -14,6 +14,8 @@ ss_error decode_secret_key(ss_key_derivation_info *key_info, unsigned char *key,
 ss_error generate_secret_key(unsigned char *secret_key, size_t key_len, ss_key_derivation_info *key_info, const char *password, unsigned char *verification_and_encrypted_key, BOOL new_key);
 
 
+void* (* volatile safe_memset)(void *, int, size_t) = memset;
+
 
 ss_error ss_generate_key_pair(ss_key_pair *key_pair, const char *private_key_password) {
 	ss_error error;
@@ -116,6 +118,7 @@ ss_error ss_decode_public_key(ss_public_key *public_key, const char *encoded) {
 		return SS_ERROR_BAD_ENCODED_FORMAT;
 
 	memcpy(public_key->value, raw_bytes, sizeof raw_bytes);
+	safe_memset(raw_bytes, 0, sizeof raw_bytes);
 	return SS_SUCCESS;
 }
 
@@ -139,11 +142,13 @@ ss_error ss_decode_key_pair(ss_key_pair *key_pair, const char *encoded, const ch
 		return SS_ERROR_BAD_ENCODED_FORMAT;
 
 	error = decode_secret_key(&result.private_key_info, result.private_key, sizeof result.private_key, result.encrypted_private_key, verification_and_xor_stream, encoded + 1, private_key_password);
+	safe_memset(verification_and_xor_stream, 0, sizeof verification_and_xor_stream);
 
 	if(error)
 		return error;
 
 	*key_pair = result;
+	safe_memset(&result, 0, sizeof result);
 	return SS_SUCCESS;
 }
 
@@ -157,11 +162,13 @@ ss_error ss_decode_shared_key(ss_shared_key *shared_key, const char *encoded, co
 		return SS_ERROR_NULL_ARGUMENT;
 
 	error = decode_secret_key(&result.key_info, result.value, sizeof result.value, result.encrypted_value, verification_and_xor_stream, encoded, password);
+	safe_memset(verification_and_xor_stream, 0, sizeof verification_and_xor_stream);
 
 	if(error)
 		return error;
 
 	*shared_key = result;
+	safe_memset(&result, 0, sizeof result);
 	return SS_SUCCESS;
 }
 
@@ -195,7 +202,12 @@ BOOL decode_base64(void *dest, size_t dest_len, const char **encoded) {
 	const char *end_ptr = ss_from_base64(dest, &dest_len, *encoded);
 
 	*encoded = end_ptr;
-	return end_ptr && dest_len == expected_base64_len;
+
+	if(end_ptr && dest_len == expected_base64_len)
+		return TRUE;
+
+	safe_memset(dest, 0, dest_len);
+	return FALSE;
 }
 
 
@@ -293,6 +305,7 @@ ss_error generate_secret_key(unsigned char *secret_key, size_t key_len, ss_key_d
 
 	ss_get_settings(&settings);
 	internal_random(salt, sizeof salt);
+
 
 	if(crypto_pwhash(verification_and_encrypted_key, SS_KEY_VERIFICATION_LENGTH + key_len, password, strlen(password), salt, settings.password_iterations, settings.password_memory_kb << 10, crypto_pwhash_ALG_DEFAULT) != 0)
 		return SS_ERROR_OUT_OF_MEMORY;

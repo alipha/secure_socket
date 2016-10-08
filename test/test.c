@@ -6,6 +6,7 @@ unsigned char test_random_counter;
 
 int main(void) {
 	suite_key_storage_generate();
+	suite_key_storage_encode();
 	return 0;
 }
 

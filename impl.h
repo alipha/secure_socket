@@ -37,8 +37,9 @@
 #define STATUS_INVALID_SIGNATURE_LENGTH     0x00001000U
 #define STATUS_INVALID_TAG_LENGTH           0x00002000U
 #define STATUS_INVALID_SIGNATURE            0x00004000U
-#define STATUS_INVALID_TAG                  0x00008000U
-#define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00010000U
+#define STATUS_INVALID_MASTER_KEY_TAG       0x00008000U
+#define STATUS_INVALID_TAG                  0x00010000U
+#define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00020000U
  
 #define EPHEMERAL_PUBLIC_KEY_LENGTH         SS_PUBLIC_KEY_LENGTH
 #define EPHEMERAL_PRIVATE_KEY_LENGTH        SS_PRIVATE_KEY_LENGTH
@@ -56,7 +57,7 @@ typedef struct message_header {
 } message_header;
 
 
-typedef struct handshake_hello_body {
+typedef struct handshake_hello {
 	message_header header;
 	uint32_t version;
 	uint32_t min_version;
@@ -70,18 +71,14 @@ typedef struct handshake_hello_body {
 	uint32_t nonce_length;
 	uint32_t signature_length;
 	uint32_t tag_length;
-} handshake_hello_body;
-
-typedef struct handshake_hello {
-	handshake_hello_body body;
-	char signature[SIGNATURE_LENGTH];
-	char tag[TAG_LENGTH];
 } handshake_hello;
 
 
 typedef struct handshake_finish {
 	message_header header;
-	char hello_tag[TAG_LENGTH];
+	char master_key_signature[SIGNATURE_LENGTH];
+	char master_symmetric_key_tag[TAG_LENGTH];
+	char ephemeral_key_tag[TAG_LENGTH];
 } handshake_finish;
 
 
