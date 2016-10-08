@@ -5,6 +5,8 @@
 
 
 void test_random(void * const buf, const size_t size);
+int test_sign_keypair(unsigned char *public_key, unsigned char *secret_key);
+
 
 void suite_key_storage_generate(void);
 void suite_key_storage_encode(void);

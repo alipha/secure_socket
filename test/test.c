@@ -1,4 +1,5 @@
 #include "test.h"
+#include <sodium.h>
 
 
 unsigned char test_random_counter;
@@ -19,3 +20,9 @@ void test_random(void * const buf, const size_t size) {
 }
 
 
+int test_sign_keypair(unsigned char *public_key, unsigned char *secret_key) {
+	unsigned char seed[32];
+	test_random(seed, sizeof seed);
+
+	return crypto_sign_ed25519_seed_keypair(public_key, secret_key, seed);
+}

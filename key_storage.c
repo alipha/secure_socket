@@ -6,38 +6,61 @@
 #include <arpa/inet.h>
 
 
-BOOL decode_base64(void *dest, size_t dest_len, const char **encoded);
+static BOOL decode_base64(void *dest, size_t dest_len, const char **encoded);
 
-ss_error encode_secret_key(char *encoded, size_t encoded_max, const ss_key_derivation_info *key_info, const unsigned char *secret_key, size_t key_len);
-ss_error decode_secret_key(ss_key_derivation_info *key_info, unsigned char *key, size_t key_len, unsigned char *encrypted_key, unsigned char *verification_and_xor_stream, const char *encoded, const char *password);
+static ss_error encode_secret_key(char *encoded, size_t encoded_max, const ss_key_derivation_info *key_info, const unsigned char *secret_key, size_t key_len);
+static ss_error decode_secret_key(ss_key_derivation_info *key_info, unsigned char *key, size_t key_len, unsigned char *encrypted_key, unsigned char *verification_and_xor_stream, const char *encoded, const char *password);
 
-ss_error generate_secret_key(unsigned char *secret_key, size_t key_len, ss_key_derivation_info *key_info, const char *password, unsigned char *verification_and_encrypted_key, BOOL new_key);
+static ss_error encrypt_secret_key(unsigned char *verification_and_encrypted_key, ss_key_derivation_info *key_info, const char *password, unsigned char *secret_key, size_t key_len);
 
-
-void* (* volatile safe_memset)(void *, int, size_t) = memset;
 
 
 ss_error ss_generate_key_pair(ss_key_pair *key_pair, const char *private_key_password) {
 	ss_error error;
+	unsigned char public_key[sizeof key_pair->public_key.value];
+	unsigned char combined_key[sizeof key_pair->private_key + sizeof key_pair->public_key.value];
 
 	if(!key_pair)
 		return SS_ERROR_NULL_ARGUMENT;
 
-	error = generate_secret_key(key_pair->private_key, sizeof key_pair->private_key, &key_pair->private_key_info, private_key_password, key_pair->encrypted_private_key, TRUE);
+	// libsodium's crypto_sign_ed25519_seed_keypair redundantly puts the public key in the first half of combined_key, so only the first half is secret
+	ss_sign_keypair(public_key, combined_key);
 
-	if(error)
+	error = encrypt_secret_key(key_pair->encrypted_private_key, &key_pair->private_key_info, private_key_password, combined_key, sizeof key_pair->private_key);
+
+	if(error) {
+		ss_memset(combined_key, 0, sizeof combined_key);
 		return error;
+	}
 
-	crypto_scalarmult_base(key_pair->public_key.value, key_pair->private_key);
+	memcpy(key_pair->public_key.value, public_key, sizeof public_key);
+	memcpy(key_pair->private_key, combined_key, sizeof key_pair->private_key);
+
+	ss_memset(combined_key, 0, sizeof combined_key);
 	return SS_SUCCESS;
 }
 
 
 ss_error ss_generate_shared_key(ss_shared_key *shared_key, const char *password) {
+	ss_error error;
+	unsigned char secret_key[sizeof shared_key->value];
+
 	if(!shared_key)
 		return SS_ERROR_NULL_ARGUMENT;
 
-	return generate_secret_key(shared_key->value, sizeof shared_key->value, &shared_key->key_info, password, shared_key->encrypted_value, TRUE);
+	ss_random(secret_key, sizeof secret_key);
+
+	error = encrypt_secret_key(shared_key->encrypted_value, &shared_key->key_info, password, secret_key, sizeof secret_key);
+
+	if(error) {
+		ss_memset(secret_key, 0, sizeof secret_key);
+		return error;
+	}
+
+	memcpy(shared_key->value, secret_key, sizeof secret_key);
+
+	ss_memset(secret_key, 0, sizeof secret_key);
+	return SS_SUCCESS;
 }
 
 
@@ -118,7 +141,7 @@ ss_error ss_decode_public_key(ss_public_key *public_key, const char *encoded) {
 		return SS_ERROR_BAD_ENCODED_FORMAT;
 
 	memcpy(public_key->value, raw_bytes, sizeof raw_bytes);
-	safe_memset(raw_bytes, 0, sizeof raw_bytes);
+	ss_memset(raw_bytes, 0, sizeof raw_bytes);
 	return SS_SUCCESS;
 }
 
@@ -142,13 +165,13 @@ ss_error ss_decode_key_pair(ss_key_pair *key_pair, const char *encoded, const ch
 		return SS_ERROR_BAD_ENCODED_FORMAT;
 
 	error = decode_secret_key(&result.private_key_info, result.private_key, sizeof result.private_key, result.encrypted_private_key, verification_and_xor_stream, encoded + 1, private_key_password);
-	safe_memset(verification_and_xor_stream, 0, sizeof verification_and_xor_stream);
+	ss_memset(verification_and_xor_stream, 0, sizeof verification_and_xor_stream);
 
 	if(error)
 		return error;
 
 	*key_pair = result;
-	safe_memset(&result, 0, sizeof result);
+	ss_memset(&result, 0, sizeof result);
 	return SS_SUCCESS;
 }
 
@@ -162,13 +185,13 @@ ss_error ss_decode_shared_key(ss_shared_key *shared_key, const char *encoded, co
 		return SS_ERROR_NULL_ARGUMENT;
 
 	error = decode_secret_key(&result.key_info, result.value, sizeof result.value, result.encrypted_value, verification_and_xor_stream, encoded, password);
-	safe_memset(verification_and_xor_stream, 0, sizeof verification_and_xor_stream);
+	ss_memset(verification_and_xor_stream, 0, sizeof verification_and_xor_stream);
 
 	if(error)
 		return error;
 
 	*shared_key = result;
-	safe_memset(&result, 0, sizeof result);
+	ss_memset(&result, 0, sizeof result);
 	return SS_SUCCESS;
 }
 
@@ -185,14 +208,14 @@ ss_error ss_change_private_key_password(ss_key_pair *key_pair, const char *new_p
 	if(!key_pair)
 		return SS_ERROR_NULL_ARGUMENT;
 
-	return generate_secret_key(key_pair->private_key, sizeof key_pair->private_key, &key_pair->private_key_info, new_password, key_pair->encrypted_private_key, FALSE);
+	return encrypt_secret_key(key_pair->encrypted_private_key, &key_pair->private_key_info, new_password, key_pair->private_key, sizeof key_pair->private_key);
 }
 
 ss_error ss_change_shared_key_password(ss_shared_key *shared_key, const char *new_password) {
 	if(!shared_key)
 		return SS_ERROR_NULL_ARGUMENT;
 	
-	return generate_secret_key(shared_key->value, sizeof shared_key->value, &shared_key->key_info, new_password, shared_key->encrypted_value, FALSE);
+	return encrypt_secret_key(shared_key->encrypted_value, &shared_key->key_info, new_password, shared_key->value, sizeof shared_key->value);
 }
 
 
@@ -206,7 +229,7 @@ BOOL decode_base64(void *dest, size_t dest_len, const char **encoded) {
 	if(end_ptr && dest_len == expected_base64_len)
 		return TRUE;
 
-	safe_memset(dest, 0, dest_len);
+	ss_memset(dest, 0, dest_len);
 	return FALSE;
 }
 
@@ -274,7 +297,7 @@ ss_error decode_secret_key(ss_key_derivation_info *key_info, unsigned char *key,
 	info_result.memory_kb = ntohl(memory_kb);
 
 
-	if(crypto_pwhash(verification_and_xor_stream, encrypted_key_len, password, strlen(password), info_result.salt, info_result.iterations, info_result.memory_kb << 10, crypto_pwhash_ALG_DEFAULT) != 0)
+	if(crypto_pwhash_argon2i(verification_and_xor_stream, encrypted_key_len, password, strlen(password), info_result.salt, info_result.iterations, info_result.memory_kb << 10, crypto_pwhash_ALG_ARGON2I13) != 0)
 		return SS_ERROR_OUT_OF_MEMORY;
 
 	if(!memcmp(verification_and_xor_stream, encrypted_key, SS_KEY_VERIFICATION_LENGTH))
@@ -288,7 +311,7 @@ ss_error decode_secret_key(ss_key_derivation_info *key_info, unsigned char *key,
 }
 
 
-ss_error generate_secret_key(unsigned char *secret_key, size_t key_len, ss_key_derivation_info *key_info, const char *password, unsigned char *verification_and_encrypted_key, BOOL new_key) {
+ss_error encrypt_secret_key(unsigned char *verification_and_encrypted_key, ss_key_derivation_info *key_info, const char *password, unsigned char *secret_key, size_t key_len) {
 
 	unsigned char salt[sizeof key_info->salt];
 	ss_settings settings;
@@ -296,22 +319,15 @@ ss_error generate_secret_key(unsigned char *secret_key, size_t key_len, ss_key_d
 	// if password is not provided
 	if(!password || !password[0]) {
 		key_info->version = 0;
-
-		if(new_key)
-			internal_random(secret_key, key_len);
-
 		return SS_SUCCESS;
 	}
 
 	ss_get_settings(&settings);
-	internal_random(salt, sizeof salt);
+	ss_random(salt, sizeof salt);
 
 
-	if(crypto_pwhash(verification_and_encrypted_key, SS_KEY_VERIFICATION_LENGTH + key_len, password, strlen(password), salt, settings.password_iterations, settings.password_memory_kb << 10, crypto_pwhash_ALG_DEFAULT) != 0)
+	if(crypto_pwhash_argon2i(verification_and_encrypted_key, SS_KEY_VERIFICATION_LENGTH + key_len, password, strlen(password), salt, settings.password_iterations, settings.password_memory_kb << 10, crypto_pwhash_ALG_ARGON2I13) != 0)
 		return SS_ERROR_OUT_OF_MEMORY;
-
-	if(new_key)
-		internal_random(secret_key, key_len);
 
 	key_info->version = 1;
 	key_info->iterations = settings.password_iterations;

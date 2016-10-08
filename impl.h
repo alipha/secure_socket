@@ -40,13 +40,14 @@
 #define STATUS_INVALID_MASTER_KEY_TAG       0x00008000U
 #define STATUS_INVALID_TAG                  0x00010000U
 #define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00020000U
- 
-#define EPHEMERAL_PUBLIC_KEY_LENGTH         SS_PUBLIC_KEY_LENGTH
-#define EPHEMERAL_PRIVATE_KEY_LENGTH        SS_PRIVATE_KEY_LENGTH
-#define TOKEN_LENGTH      32U
-#define SIGNATURE_LENGTH  32U
-#define TAG_LENGTH        32U
-#define NONCE_LENGTH      12U
+
+#define COMBINED_KEY_LENGTH					(SS_PUBLIC_KEY_LENGTH + SS_PRIVATE_KEY_LENGTH) 
+#define EPHEMERAL_PUBLIC_KEY_LENGTH         32U
+#define EPHEMERAL_PRIVATE_KEY_LENGTH        32U
+#define TOKEN_LENGTH                        32U
+#define SIGNATURE_LENGTH                    64U
+#define TAG_LENGTH                          16U
+#define NONCE_LENGTH                        8U
 
 
 typedef struct message_header {
@@ -109,6 +110,13 @@ struct secure_socket {
 };
 
 
-extern void (*internal_random)(void * const buf, const size_t size);
+extern void (*ss_random)(void * const buf, const size_t size);
+extern int (*ss_sign_keypair)(unsigned char *, unsigned char*);
+
+extern void* (* volatile ss_memset)(void *, int, size_t);
+
+
+void ss_sign_message(unsigned char *signature, const void *message, size_t message_len, const ss_key_pair *key_pair);
+BOOL ss_verify_signature(const unsigned char *signature, const void *message, size_t message_len, ss_public_key *public_key);
 
 #endif

@@ -8,16 +8,18 @@
 #include <sodium.h>
 
 
-void test_generate_key_pair_no_password(void);
-void test_generate_key_pair_with_password(void);
-void test_generate_shared_key_no_password(void);
-void test_generate_shared_key_with_password(void);
+static void test_generate_key_pair_no_password(void);
+static void test_generate_key_pair_with_password(void);
+static void test_key_pair_can_sign_and_verify(void);
+static void test_generate_shared_key_no_password(void);
+static void test_generate_shared_key_with_password(void);
 
 
 void suite_key_storage_generate() {
 	puts("Start:   suite_key_storage_generate");
 	test_generate_key_pair_no_password();
 	test_generate_key_pair_with_password();
+	test_key_pair_can_sign_and_verify();
 	test_generate_shared_key_no_password();
 	test_generate_shared_key_with_password();
 	puts("Success: suite_key_storage_generate");
@@ -33,8 +35,8 @@ void test_generate_key_pair_no_password() {
 	unsigned char counter3, counter4, counter5;
 	unsigned char expected_private_key[SS_PRIVATE_KEY_LENGTH];
 	unsigned char expected_private_key5[SS_PRIVATE_KEY_LENGTH];
-	unsigned char expected_public_key[] = {143, 64, 197, 173, 182, 143, 37, 98, 74, 229, 178, 20, 234, 118, 122, 110, 201, 77, 130, 157, 61, 123, 94, 26, 209, 186, 111, 62, 33, 56, 40, 95};
-	unsigned char expected_public_key5[] = {7, 163, 124, 188, 20, 32, 147, 200, 183, 85, 220, 27, 16, 232, 108, 180, 38, 55, 74, 209, 106, 168, 83, 237, 11, 223, 192, 178, 184, 109, 28, 124};
+	unsigned char expected_public_key[] = {3, 161, 7, 191, 243, 206, 16, 190, 29, 112, 221, 24, 231, 75, 192, 153, 103, 228, 214, 48, 155, 165, 13, 95, 29, 220, 134, 100, 18, 85, 49, 184};
+	unsigned char expected_public_key5[] = {121, 181, 86, 46, 143, 230, 84, 249, 64, 120, 177, 18, 232, 169, 139, 167, 144, 31, 133, 58, 230, 149, 190, 215, 224, 227, 145, 11, 173, 4, 150, 100};
 
 	for(size_t i = 0; i < sizeof expected_private_key; i++) {
 		expected_private_key[i] = i;
@@ -42,12 +44,12 @@ void test_generate_key_pair_no_password() {
 	}
 
 	// action
-	internal_random = randombytes_buf;
+	ss_sign_keypair = crypto_sign_ed25519_keypair;
 	error = ss_generate_key_pair(NULL, NULL);
 	error1 = ss_generate_key_pair(&key1, NULL);
 	error2 = ss_generate_key_pair(&key2, NULL);
 
-	internal_random = test_random;
+	ss_sign_keypair = test_sign_keypair;
 	test_random_counter = 0;
 	error3 = ss_generate_key_pair(&key3, NULL);
 	counter3 = test_random_counter;
@@ -58,9 +60,10 @@ void test_generate_key_pair_no_password() {
 	error5 = ss_generate_key_pair(&key5, NULL);
 	counter5 = test_random_counter;
 	test_random_counter = 0;
-	internal_random = randombytes_buf;
+	ss_sign_keypair = crypto_sign_ed25519_keypair;
 
 	/*
+printf("Public keys:\n");
 	for(size_t i = 0; i < sizeof expected_public_key; i++)
 		printf("%d, ", key3.public_key.value[i]);
 	printf("\n");
@@ -68,7 +71,16 @@ void test_generate_key_pair_no_password() {
 	for(size_t i = 0; i < sizeof expected_public_key; i++)
 		printf("%d, ", key5.public_key.value[i]);
 	printf("\n");
-	*/	
+	
+printf("Private keys:\n");
+	for(size_t i = 0; i < sizeof expected_public_key; i++)
+		printf("%d, ", key3.private_key[i]);
+	printf("\n");
+
+	for(size_t i = 0; i < sizeof expected_public_key; i++)
+		printf("%d, ", key5.private_key[i]);
+	printf("\n");
+	*/
 
 	// verify
 	assert(error == SS_ERROR_NULL_ARGUMENT);
@@ -106,6 +118,58 @@ void test_generate_key_pair_with_password() {
 }
 
 
+void test_key_pair_can_sign_and_verify() {
+	puts("\ttest_key_pair_can_sign_and_verify");
+
+	// setup
+	const char *msg_a = "Hello, this magnificant world!";
+	const char *msg_b = "hello, this magnificant world!";
+
+	unsigned char sig1[SIGNATURE_LENGTH];
+	unsigned char sig1_again[SIGNATURE_LENGTH + 1];
+	unsigned char sig2[SIGNATURE_LENGTH];
+	unsigned char sig3[SIGNATURE_LENGTH];
+	unsigned char sig1b[SIGNATURE_LENGTH];
+
+	ss_key_pair key1, key2, key3;
+	ss_error error1, error2;
+
+	sig1_again[SIGNATURE_LENGTH] = 'x';
+
+	error1 = ss_generate_key_pair(&key1, NULL);
+	error2 = ss_generate_key_pair(&key2, NULL);
+	memcpy(&key3, &key1, sizeof key1);
+	memcpy(&key3.public_key, &key2.public_key, sizeof key2.public_key);
+
+	// act
+	ss_sign_message(sig1, msg_a, strlen(msg_a), &key1);
+	ss_sign_message(sig1_again, msg_a, strlen(msg_a), &key1);
+	ss_sign_message(sig2, msg_a, strlen(msg_a), &key2);
+	ss_sign_message(sig3, msg_a, strlen(msg_a), &key3);
+	ss_sign_message(sig1b, msg_b, strlen(msg_b), &key1);
+
+	// verify
+	assert(error1 == SS_SUCCESS);
+	assert(error2 == SS_SUCCESS);
+	assert(sig1_again[SIGNATURE_LENGTH] == 'x');
+	assert(memcmp(sig1, sig1_again, sizeof sig1) == 0);
+	assert(memcmp(sig1, sig2, sizeof sig1) != 0);
+	assert(memcmp(sig1, sig3, sizeof sig1) != 0);
+	assert(memcmp(sig1, sig1b, sizeof sig1) != 0);
+	assert(memcmp(sig2, sig3, sizeof sig2) != 0);
+	assert(ss_verify_signature(sig1, msg_a, strlen(msg_a), &key1.public_key));
+	assert(ss_verify_signature(sig2, msg_a, strlen(msg_a), &key2.public_key));
+	assert(!ss_verify_signature(sig3, msg_a, strlen(msg_a), &key3.public_key));
+	assert(!ss_verify_signature(sig3, msg_a, strlen(msg_a), &key1.public_key));
+	assert(ss_verify_signature(sig1b, msg_b, strlen(msg_b), &key1.public_key));
+	assert(!ss_verify_signature(sig1, msg_b, strlen(msg_b), &key1.public_key));
+	assert(!ss_verify_signature(sig2, msg_a, strlen(msg_a), &key1.public_key));
+	assert(!ss_verify_signature(sig1, msg_a, sizeof msg_a, &key1.public_key));
+		
+	// TODO: test with encrypted keys
+}
+
+
 void test_generate_shared_key_no_password() {
 	puts("\ttest_generate_shared_key_no_password");
 
@@ -119,12 +183,12 @@ void test_generate_shared_key_no_password() {
 		expected_value[i] = i;
 
 	// action
-	internal_random = randombytes_buf;
+	ss_random = randombytes_buf;
 	error = ss_generate_shared_key(NULL, NULL);
 	error1 = ss_generate_shared_key(&key1, NULL);
 	error2 = ss_generate_shared_key(&key2, NULL);
 
-	internal_random = test_random;
+	ss_random = test_random;
 	test_random_counter = 0;
 	error3 = ss_generate_shared_key(&key3, NULL);
 	counter3 = test_random_counter;
@@ -132,7 +196,7 @@ void test_generate_shared_key_no_password() {
 	error4 = ss_generate_shared_key(&key4, "");
 	counter4 = test_random_counter;
 	test_random_counter = 0;
-	internal_random = randombytes_buf;
+	ss_random = randombytes_buf;
 
 	// verify
 	assert(error == SS_ERROR_NULL_ARGUMENT);

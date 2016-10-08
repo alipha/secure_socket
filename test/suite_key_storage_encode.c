@@ -8,11 +8,11 @@
 #include <sodium.h>
 
 
-void test_encode_public_key(void);
-void test_encode_key_pair_no_password(void);
-void test_encode_key_pair_with_password(void);
-void test_encode_shared_key_no_password(void);
-void test_encode_shared_key_with_password(void);
+static void test_encode_public_key(void);
+static void test_encode_key_pair_no_password(void);
+static void test_encode_key_pair_with_password(void);
+static void test_encode_shared_key_no_password(void);
+static void test_encode_shared_key_with_password(void);
 
 
 void suite_key_storage_encode(void) {
@@ -105,12 +105,12 @@ void test_encode_key_pair_no_password(void) {
 	error5 = ss_encode_key_pair(encoded1, sizeof encoded1 - 1, &key1);
 	error6 = ss_encode_key_pair(encoded2, sizeof encoded2, &key1);
 
-	internal_random = test_random;
+	ss_sign_keypair = test_sign_keypair;
 	test_random_counter = 0;
 	error7 = ss_generate_key_pair(&key3, NULL);
 	counter7 = test_random_counter;
 	test_random_counter = 0;
-	internal_random = randombytes_buf;
+	ss_sign_keypair = crypto_sign_ed25519_keypair;
 	error8 = ss_encode_key_pair(encoded3, sizeof encoded3, &key3);
 
 	// verify
@@ -127,7 +127,7 @@ void test_encode_key_pair_no_password(void) {
 	assert(counter7 == SS_PRIVATE_KEY_LENGTH);
 	assert(strcmp(encoded1, "AAMGCQwPEhUYGx4hJCcqLTAzNjk8P0JFSEtOUVRXWl0:0:AQMFBwkLDQ8RExUXGRsdHyEjJScpKy0vMTM1Nzk7PT8") == 0);
 	assert(strcmp(encoded2, "AAMGCQwPEhUYGx4hJCcqLTAzNjk8P0JFSEtOUVRXWl0:0:AQMFBwkLDQ8RExUXGRsdHyEjJScpKy0vMTM1Nzk7PT8") == 0);
-	assert(strcmp(encoded3, "j0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8:0:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8") == 0);
+	assert(strcmp(encoded3, "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg:0:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8") == 0);
 	assert(encoded1[SS_ENCODED_KEY_PAIR_MIN_LENGTH + 1] == 'y');
 	assert(encoded2[SS_ENCODED_KEY_PAIR_MIN_LENGTH + 1] == 'y');
 }
@@ -171,12 +171,12 @@ void test_encode_shared_key_no_password(void) {
 	error5 = ss_encode_shared_key(encoded1, sizeof encoded1 - 1, &key1);
 	error6 = ss_encode_shared_key(encoded2, sizeof encoded2, &key1);
 
-	internal_random = test_random;
+	ss_random = test_random;
 	test_random_counter = 0;
 	error7 = ss_generate_shared_key(&key3, NULL);
 	counter7 = test_random_counter;
 	test_random_counter = 0;
-	internal_random = randombytes_buf;
+	ss_random = randombytes_buf;
 	error8 = ss_encode_shared_key(encoded3, sizeof encoded3, &key3);
 
 	// verify
