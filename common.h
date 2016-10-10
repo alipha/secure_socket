@@ -25,6 +25,7 @@
 #define SS_ERROR_INVALID_PASSWORD    4
 #define SS_ERROR_BAD_ENCODED_FORMAT  5
 #define SS_ERROR_BAD_ENCODED_LENGTH	 6
+#define SS_ERROR_INVALID_PORT        7
 
 
 typedef uint32_t ss_error;

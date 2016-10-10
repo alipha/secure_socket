@@ -1,6 +1,7 @@
 #include "impl.h"
 #include <sodium.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
 
 // not using libsodium's constants directly because if there were any changes to
@@ -31,6 +32,9 @@ int (*ss_sign_keypair)(unsigned char *, unsigned char*) = crypto_sign_ed25519_ke
 
 void* (* volatile ss_memset)(void *, int, size_t) = memset;
 
+void* (*ss_malloc)(size_t) = malloc;
+void (*ss_malloc_free)(void *) = free;
+
 
 void ss_sign_message(unsigned char *signature, const void *message, size_t message_len, const ss_key_pair *key_pair) {
 	unsigned char combined_key[COMBINED_KEY_LENGTH];
@@ -55,3 +59,17 @@ BOOL ss_verify_signature(const unsigned char *signature, const void *message, si
 	return crypto_sign_ed25519_verify_detached(signature, message, message_len, public_key->value) == 0;
 }
 
+
+void increment_nonce_by_2(unsigned char *nonce) {
+	nonce[NONCE_LENGTH - 1] += 2;
+
+	if(nonce[NONCE_LENGTH - 1] > 1)	// there was no wrap around (carry-over)
+		return;
+
+	for(int i = NONCE_LENGTH - 2; i >= 0; i--) {  // wrap around should never happen in practical usage
+		nonce[i]++;
+		if(nonce[i] > 0)
+			return;
+	}
+}
+ 

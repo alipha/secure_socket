@@ -3,6 +3,7 @@
 
 #include "secure_socket.h"
 #include <stdint.h>
+#include <time.h>
 
 
 #define PROVIDED_VERSION                    0x00000001U
@@ -39,7 +40,8 @@
 #define STATUS_INVALID_SIGNATURE            0x00004000U
 #define STATUS_INVALID_MASTER_KEY_TAG       0x00008000U
 #define STATUS_INVALID_TAG                  0x00010000U
-#define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00020000U
+#define STATUS_INVALID_NONCE                0x00020000U
+#define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00040000U
 
 #define COMBINED_KEY_LENGTH					(SS_PUBLIC_KEY_LENGTH + SS_PRIVATE_KEY_LENGTH) 
 #define EPHEMERAL_PUBLIC_KEY_LENGTH         32U
@@ -48,6 +50,24 @@
 #define SIGNATURE_LENGTH                    64U
 #define TAG_LENGTH                          16U
 #define NONCE_LENGTH                        8U
+
+#define STATE_INIT                          0x00000001U
+#define STATE_HAS_MASTER_KEY                0x00000002U
+#define STATE_HAS_SOCKET                    0x00000004U
+#define STATE_HAS_BIND                      0x00000008U
+#define STATE_CONNECTED                     0x00000010U
+#define STATE_SENT_HELLO                    0x00000020U
+#define STATE_RECEIVED_HELLO                0x00000040U
+#define STATE_SENT_FINISH                   0x00000080U
+#define STATE_RECEIVED_FINISH               0x00000100U
+#define STATE_START_NEW_EPHEMERAL_KEY       0x00000200U
+#define STATE_RECEIVED_NEW_EPHEMERAL_KEY    0x00000400U
+
+#define MESSAGE_TYPE_HELLO                  1
+#define MESSAGE_TYPE_FINISH                 2
+#define MESSAGE_TYPE_DATA                   3
+#define MESSAGE_TYPE_PROOF_OF_WORK          4
+
 
 
 typedef struct message_header {
@@ -62,6 +82,7 @@ typedef struct handshake_hello {
 	message_header header;
 	uint32_t version;
 	uint32_t min_version;
+// TODO: client proof of work fields
 	uint32_t token_timeout_seconds;
 	uint32_t session_token_length;
 	char session_token[TOKEN_LENGTH];
@@ -85,7 +106,7 @@ typedef struct handshake_finish {
 
 typedef struct message_frame {
 	message_header header;
-	char nonce[NONCE_LENGTH];
+	char nonce[NONCE_LENGTH];	// client starts even, server starts odd, increment by 2
 	uint32_t ephemeral_key_id;
 	char new_ephemeral_public_key[EPHEMERAL_PUBLIC_KEY_LENGTH];
 	char ciphertext[1];
@@ -95,13 +116,19 @@ typedef struct message_frame {
 struct secure_socket {
 	int socket;
 	uint32_t state;
+	time_t connected_time;
 	handshake_hello my_hello;
 	handshake_hello their_hello;
-	ss_shared_key shared_key;
+	unsigned char shared_key[SS_SHARED_KEY_LENGTH];
 	unsigned char master_private_key[SS_PRIVATE_KEY_LENGTH];
+	unsigned char their_public_key[SS_PUBLIC_KEY_LENGTH];
 	unsigned char ephemeral_private_key[EPHEMERAL_PRIVATE_KEY_LENGTH];
-	unsigned char nonce[NONCE_LENGTH];
+	unsigned char my_nonce[NONCE_LENGTH];
+	unsigned char their_nonce[NONCE_LENGTH];
 	uint32_t ephemeral_key_id;
+	time_t ephemeral_key_creation_time;
+	uint32_t ephemeral_key_message_count;
+	uint32_t ephemeral_key_byte_count;
 	unsigned char my_new_ephemeral_public_key[EPHEMERAL_PUBLIC_KEY_LENGTH];
 	unsigned char my_new_ephemeral_private_key[EPHEMERAL_PRIVATE_KEY_LENGTH];
 	unsigned char their_new_ephemeral_public_key[EPHEMERAL_PUBLIC_KEY_LENGTH];
@@ -111,12 +138,17 @@ struct secure_socket {
 
 
 extern void (*ss_random)(void * const buf, const size_t size);
-extern int (*ss_sign_keypair)(unsigned char *, unsigned char*);
+extern int (*ss_sign_keypair)(unsigned char *, unsigned char *);
 
 extern void* (* volatile ss_memset)(void *, int, size_t);
+
+extern void* (*ss_malloc)(size_t);
+extern void (*ss_malloc_free)(void *);
 
 
 void ss_sign_message(unsigned char *signature, const void *message, size_t message_len, const ss_key_pair *key_pair);
 BOOL ss_verify_signature(const unsigned char *signature, const void *message, size_t message_len, ss_public_key *public_key);
+
+void increment_nonce_by_2(unsigned char *nonce);
 
 #endif

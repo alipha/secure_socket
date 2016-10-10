@@ -2,6 +2,7 @@
 #include "impl.h"
 #include "base64.h"
 #include <sodium.h>
+#include <assert.h>
 #include <string.h>
 #include <arpa/inet.h>
 
@@ -221,6 +222,9 @@ ss_error ss_change_shared_key_password(ss_shared_key *shared_key, const char *ne
 
 
 BOOL decode_base64(void *dest, size_t dest_len, const char **encoded) {
+	assert(dest != NULL);
+	assert(encoded != NULL);
+
 	size_t expected_base64_len = (dest_len * 4 + 2) / 3;
 	const char *end_ptr = ss_from_base64(dest, &dest_len, *encoded);
 
@@ -235,6 +239,10 @@ BOOL decode_base64(void *dest, size_t dest_len, const char **encoded) {
 
 
 ss_error encode_secret_key(char *encoded, size_t encoded_max, const ss_key_derivation_info *key_info, const unsigned char *secret_key, size_t key_len) {
+	assert(encoded != NULL);
+	assert(key_info != NULL);
+	assert(secret_key != NULL);
+
 	const char *encoded_end = encoded + encoded_max;
 	uint32_t iterations = htonl(key_info->iterations);
 	uint32_t memory_kb = htonl(key_info->memory_kb);
@@ -265,6 +273,12 @@ ss_error decode_secret_key(ss_key_derivation_info *key_info, unsigned char *key,
 	uint32_t iterations;
 	uint32_t memory_kb;
 	size_t encrypted_key_len = SS_KEY_VERIFICATION_LENGTH + key_len;
+
+	assert(key_info != NULL);
+	assert(key != NULL);
+	assert(encrypted_key != NULL);
+	assert(verification_and_xor_stream != NULL);
+	assert(encoded != NULL);
 
 	if((encoded[0] != '0' && encoded[0] != '1') || encoded[1] != ':')
 		return SS_ERROR_BAD_ENCODED_FORMAT;
@@ -315,6 +329,10 @@ ss_error encrypt_secret_key(unsigned char *verification_and_encrypted_key, ss_ke
 
 	unsigned char salt[sizeof key_info->salt];
 	ss_settings settings;
+
+	assert(verification_and_encrypted_key != NULL);
+	assert(key_info != NULL);
+	assert(secret_key != NULL);
 
 	// if password is not provided
 	if(!password || !password[0]) {

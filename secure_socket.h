@@ -74,7 +74,14 @@ void ss_get_settings(ss_settings *s);
 void ss_set_settings(ss_settings *s);
 
 
-secure_socket* ss_socket(const ss_key_pair *my_key_pair);
+secure_socket* ss_socket_init(const ss_key_pair *my_key_pair);  // my_key_pair may be NULL
 
+ss_error ss_shared_key_connect(secure_socket *sock, const char *host, int port, const ss_shared_key *shared_key);
+ss_error ss_public_key_connect(secure_socket *sock, const char *host, int port, const ss_public_key *server_public_key);
+
+ss_error ss_shared_key_listen(secure_socket *sock, int port, const ss_shared_key *shared_key);
+ss_error ss_public_key_listen(secure_socket *sock, int port, const ss_public_key *client_public_keys, size_t key_count);
+
+void ss_socket_free(secure_socket *sock);
 
 #endif
