@@ -25,6 +25,8 @@
 
 static ss_error do_connect(secure_socket *sock, const char *host, int port);
 static ss_error do_listen(secure_socket *sock, int port);
+static ss_error make_connection(secure_socket *sock, const char *host, int port);
+static ss_error send_hello(secure_socket *sock);
 
 
 static ss_settings settings = {
@@ -53,6 +55,7 @@ secure_socket* ss_socket_init(const ss_key_pair *my_key_pair) {  // my_key_pair 
 
 	memset(sock, 0, sizeof *sock);
 	sock->state = STATE_INIT;
+	sock->their_public_keys = NULL;
 	sock->current_input_frame = NULL;
 
 	if(my_key_pair) {
@@ -63,9 +66,8 @@ secure_socket* ss_socket_init(const ss_key_pair *my_key_pair) {  // my_key_pair 
 
 	sock->my_hello.header.message_type = MESSAGE_TYPE_HELLO;
 	sock->my_hello.header.status = STATUS_GOOD;
- 	sock->my_hello.header.provided_fields |= PROVIDED_VERSION | PROVIDED_EPHEMERAL_PUBLIC_KEY;
+ 	sock->my_hello.header.provided_fields |= PROVIDED_EPHEMERAL_PUBLIC_KEY;
 
-	sock->my_hello.version = 1;
 	// TODO: generate_keypair(sock->my_hello.ephemeral_public_key, sock->ephemeral_private_key);
 	sock->ephemeral_key_creation_time = time(NULL);
 
@@ -81,7 +83,7 @@ ss_error ss_shared_key_connect(secure_socket *sock, const char *host, int port, 
 	if(!sock || !host || !shared_key)
 		return SS_ERROR_NULL_ARGUMENT;
 
-	// TODO
+	memcpy(sock->shared_key, shared_key->value, sizeof sock->shared_key);
 	return do_connect(sock, host, port);
 }
 
@@ -90,7 +92,13 @@ ss_error ss_public_key_connect(secure_socket *sock, const char *host, int port, 
 	if(!sock || !host || !server_public_key)
 		return SS_ERROR_NULL_ARGUMENT;
 	
-	// TODO
+	sock->their_public_keys = ss_malloc(sizeof server_public_key->value);
+
+	if(!sock->their_public_keys)
+		return SS_ERROR_OUT_OF_MEMORY;
+
+	sock->their_public_key_count = 1;
+	memcpy(sock->their_public_keys, server_public_key->value, sizeof server_public_key->value);
 	return do_connect(sock, host, port);
 }
 
@@ -100,44 +108,121 @@ ss_error ss_shared_key_listen(secure_socket *sock, int port, const ss_shared_key
 	if(!sock || !shared_key)
 		return SS_ERROR_NULL_ARGUMENT;
 
-	// TODO
+	// TODO: state and provided_fields (check other functions too)
+	memcpy(sock->shared_key, shared_key->value, sizeof sock->shared_key);
 	return do_listen(sock, port);
 }
 
 
 ss_error ss_public_key_listen(secure_socket *sock, int port, const ss_public_key *client_public_keys, size_t key_count) {
+	size_t key_len = sizeof client_public_keys->value;
+
 	if(!sock || (!client_public_keys && key_count > 0))
 		return SS_ERROR_NULL_ARGUMENT;
 
-	// TODO
+	if(key_count > 0) {
+		sock->their_public_keys = ss_malloc(key_count * key_len);
+
+		if(!sock->their_public_keys)
+			return SS_ERROR_OUT_OF_MEMORY;
+
+		sock->their_public_key_count = key_count;
+
+		for(size_t i = 0; i < key_count; i++)
+			memcpy(sock->their_public_keys + i * key_len, client_public_keys[i].value, key_len);
+	}
+
 	return do_listen(sock, port);
 }
 
 
 
 void ss_socket_free(secure_socket *sock) {
-	if(sock) {
-		close(sock->socket);
-		ss_malloc_free(sock->current_input_frame);
-	}
+	if(!sock)
+		return;
 
+	ss_internal_close(sock->socket);
+
+	ss_malloc_free(sock->their_public_keys);
+	ss_malloc_free(sock->current_input_frame);
+
+	ss_memset(sock, 0, sizeof *sock);
 	ss_malloc_free(sock);
 }
 
 
 ss_error do_connect(secure_socket *sock, const char *host, int port) {
+	int error;
+
 	if(port < 1 || port > 65535)
 		return SS_ERROR_INVALID_PORT;
 
-	// TODO
+	error = make_connection(sock, host, port);
+
+	if(!error)
+		error = send_hello(sock);
+
+	return error;
+}
+
+
+ss_error make_connection(secure_socket *sock, const char *host, int port) {
+	struct addrinfo *addr_result;
+	// TODO: add hints like AI_ADDRCONFIG
+	ss_error error = ss_getaddrinfo(host, NULL, NULL, &addr_result);
+
+	if(error)
+		return SS_ERROR_INVALID_HOSTNAME;
+
+	while(addr_result) {
+		sock->socket = ss_internal_socket(addr_result->ai_family, addr_result->ai_socktype, addr_result->ai_protocol);
+	
+		if (sock->socket == -1)
+			continue;
+
+		if (ss_internal_connect(sock->socket, addr_result->ai_addr, addr_result->ai_addrlen) != -1)
+			break;
+
+		ss_internal_close(sock->socket);
+		addr_result = addr_result->ai_next;
+	}
+
+	ss_freeaddrinfo(addr_result);
 	return SS_SUCCESS;
 }
 
 
 ss_error do_listen(secure_socket *sock, int port) {
+	ss_error error;
+
 	if(port < 1 || port > 65535)
 		return SS_ERROR_INVALID_PORT;
 
 	// TODO
-	return SS_SUCCESS;
+
+	return error;
 }
+
+
+secure_socket* ss_accept(secure_socket *server_sock) {
+	ss_error error;
+	secure_socket *sock;
+
+	do {
+		// accept
+
+		if(!error)
+			error = send_hello(sock);
+
+		if(error)
+			ss_internal_close(sock->socket);
+	} while(error);
+
+	return sock;
+}
+
+
+ss_error send_hello(secure_socket *sock) {
+	return sock->state;
+}
+

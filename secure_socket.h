@@ -82,6 +82,8 @@ ss_error ss_public_key_connect(secure_socket *sock, const char *host, int port, 
 ss_error ss_shared_key_listen(secure_socket *sock, int port, const ss_shared_key *shared_key);
 ss_error ss_public_key_listen(secure_socket *sock, int port, const ss_public_key *client_public_keys, size_t key_count);
 
+secure_socket* ss_accept(secure_socket *sock);
+
 void ss_socket_free(secure_socket *sock);
 
 #endif

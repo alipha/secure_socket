@@ -4,6 +4,7 @@
 #include "secure_socket.h"
 #include <stdint.h>
 #include <time.h>
+#include <netdb.h>
 
 
 #define PROVIDED_VERSION                    0x00000001U
@@ -43,6 +44,7 @@
 #define STATUS_INVALID_NONCE                0x00020000U
 #define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00040000U
 
+#define MESSAGE_HEADER_LENGTH               (4 * sizeof(uint32_t))
 #define COMBINED_KEY_LENGTH					(SS_PUBLIC_KEY_LENGTH + SS_PRIVATE_KEY_LENGTH) 
 #define EPHEMERAL_PUBLIC_KEY_LENGTH         32U
 #define EPHEMERAL_PRIVATE_KEY_LENGTH        32U
@@ -121,7 +123,8 @@ struct secure_socket {
 	handshake_hello their_hello;
 	unsigned char shared_key[SS_SHARED_KEY_LENGTH];
 	unsigned char master_private_key[SS_PRIVATE_KEY_LENGTH];
-	unsigned char their_public_key[SS_PUBLIC_KEY_LENGTH];
+	unsigned char *their_public_keys;
+	size_t their_public_key_count;
 	unsigned char ephemeral_private_key[EPHEMERAL_PRIVATE_KEY_LENGTH];
 	unsigned char my_nonce[NONCE_LENGTH];
 	unsigned char their_nonce[NONCE_LENGTH];
@@ -145,10 +148,29 @@ extern void* (* volatile ss_memset)(void *, int, size_t);
 extern void* (*ss_malloc)(size_t);
 extern void (*ss_malloc_free)(void *);
 
+extern int (*ss_internal_close)(int);
+extern int (*ss_internal_socket)(int, int, int);
+extern int (*ss_internal_connect)(int, const struct sockaddr *, socklen_t);
+
+extern int (*ss_getaddrinfo)(const char *, const char *, const struct addrinfo *, struct addrinfo**);
+extern void (*ss_freeaddrinfo)(struct addrinfo *);
+
+
 
 void ss_sign_message(unsigned char *signature, const void *message, size_t message_len, const ss_key_pair *key_pair);
 BOOL ss_verify_signature(const unsigned char *signature, const void *message, size_t message_len, ss_public_key *public_key);
 
 void increment_nonce_by_2(unsigned char *nonce);
+
+void binary_write(unsigned char **output, const void *input, size_t amount);
+BOOL binary_read(void *output, const unsigned char **input, const unsigned char *end_ptr, size_t amount);
+void uint32_write(unsigned char **output, uint32_t value);
+BOOL uint32_read(uint32_t *value, const unsigned char **input, const unsigned char *end_ptr);
+
+size_t pack_header(unsigned char *output, const message_header *header);
+ss_error unpack_header(message_header *header, const unsigned char **input);
+
+size_t pack_hello(unsigned char *output, const handshake_hello *hello);
+ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const unsigned char *end_ptr);
 
 #endif
