@@ -27,6 +27,8 @@
 #define SS_ERROR_BAD_ENCODED_LENGTH  6
 #define SS_ERROR_INVALID_PORT        7
 #define SS_ERROR_INVALID_HOSTNAME    8
+#define SS_ERROR_DISCONNECT          9
+#define SS_ERROR_INVALID_RESPONSE   10
 
 
 typedef uint32_t ss_error;

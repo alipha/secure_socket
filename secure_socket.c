@@ -1,6 +1,7 @@
 #include "secure_socket.h"
 #include "impl.h"
 #include <string.h>
+#include <assert.h>
 #include <sodium.h>
 
 
@@ -26,13 +27,23 @@
 static ss_error do_connect(secure_socket *sock, const char *host, int port);
 static ss_error do_listen(secure_socket *sock, int port);
 static ss_error make_connection(secure_socket *sock, const char *host, int port);
+static ss_error perform_handshake(secure_socket *sock);
+
 static ss_error send_hello(secure_socket *sock);
+static ss_error receive_hello(secure_socket *sock);
+static ss_error send_finish(secure_socket *sock);
+static ss_error receive_finish(secure_socket *sock);
+static void generate_finish(handshake_finish *finish, unsigned char *combined_hellos, secure_socket *sock, unsigned char *first_hello, size_t first_hello_len, unsigned char *second_hello, size_t second_hello_len);
+
+static ss_error receive_exact(secure_socket *sock, unsigned char *buffer, size_t amount);
+static ss_error receive_message(secure_socket *sock, unsigned char **buffer_ptr, size_t buffer_max);
 
 
 static ss_settings settings = {
 	crypto_pwhash_OPSLIMIT_INTERACTIVE,
 	crypto_pwhash_MEMLIMIT_INTERACTIVE >> 10
 };
+
 
 
 void ss_get_settings(ss_settings *s) {
@@ -45,7 +56,6 @@ void ss_set_settings(ss_settings *s) {
 		settings = *s;
 }
 
- 
 
 secure_socket* ss_socket_init(const ss_key_pair *my_key_pair) {  // my_key_pair may be NULL
 	secure_socket *sock = ss_malloc(sizeof(secure_socket));
@@ -158,9 +168,9 @@ ss_error do_connect(secure_socket *sock, const char *host, int port) {
 		return SS_ERROR_INVALID_PORT;
 
 	error = make_connection(sock, host, port);
-
+	
 	if(!error)
-		error = send_hello(sock);
+		error = perform_handshake(sock);
 
 	return error;
 }
@@ -192,6 +202,23 @@ ss_error make_connection(secure_socket *sock, const char *host, int port) {
 }
 
 
+ss_error perform_handshake(secure_socket *sock) {
+
+	ss_error error = send_hello(sock);
+
+	if(!error)
+		error = receive_hello(sock);
+
+	if(!error)
+		error = send_finish(sock);
+
+	if(!error)
+		error = receive_finish(sock);
+
+	return error;
+}
+
+
 ss_error do_listen(secure_socket *sock, int port) {
 	ss_error error;
 
@@ -212,7 +239,7 @@ secure_socket* ss_accept(secure_socket *server_sock) {
 		// accept
 
 		if(!error)
-			error = send_hello(sock);
+			error = perform_handshake(sock);
 
 		if(error)
 			ss_internal_close(sock->socket);
@@ -223,6 +250,124 @@ secure_socket* ss_accept(secure_socket *server_sock) {
 
 
 ss_error send_hello(secure_socket *sock) {
-	return sock->state;
+	// TODO: is setting length here necessary?
+	sock->my_hello.header.length = pack_hello(sock->my_packed_hello, &sock->my_hello);
+	ssize_t sent = ss_internal_send(sock->socket, sock->my_packed_hello, sock->my_hello.header.length, 0);
+
+	if(sent <= 0)
+		return SS_ERROR_DISCONNECT;
+	
+	return SS_SUCCESS;
+}
+
+
+ss_error receive_hello(secure_socket *sock) {
+	const unsigned char *packed_ptr = sock->their_packed_hello;
+
+	ss_error error = receive_message(sock, &packed_ptr, sizeof sock->their_packed_hello);
+
+	if(error == SS_ERROR_BUFFER_TOO_SMALL)
+		return SS_ERROR_INVALID_RESPONSE;
+	else if(error)
+		return error;
+	
+	return unpack_hello(&sock->their_hello, &packed_ptr, sock->their_packed_hello + sizeof sock->their_packed_hello);
+}
+
+
+ss_error send_finish(secure_socket *sock) {
+	handshake_finish finish;
+	unsigned char combined_hellos[sizeof sock->my_packed_hello + MAX_HELLO_LENGTH];
+
+	generate_finish(&finish, combined_hellos, sock, sock->my_packed_hello, sock->my_hello.header.length, sock->their_packed_hello, sock->their_hello.header.length);
+
+	// TODO: sign
+	// TODO: send
+
+	return SS_SUCCESS;
+}
+
+
+ss_error receive_finish(secure_socket *sock) {
+	handshake_finish received_finish;
+	handshake_finish expected_finish;
+	unsigned char combined_hellos[sizeof sock->my_packed_hello + MAX_HELLO_LENGTH];
+
+	generate_finish(&expected_finish, combined_hellos, sock, sock->their_packed_hello, sock->their_hello.header.length, sock->my_packed_hello, sock->my_hello.header.length);
+
+	// TODO: receive
+	// TODO: verify
+
+	return SS_SUCCESS;
+}
+
+
+void generate_finish(handshake_finish *finish, unsigned char *combined_hellos, secure_socket *sock, unsigned char *first_hello, size_t first_hello_len, unsigned char *second_hello, size_t second_hello_len) {
+	memcpy(combined_hellos, first_hello, first_hello_len);
+	memcpy(combined_hellos + first_hello_len, second_hello, second_hello_len);
+
+}
+
+
+ss_error receive_exact(secure_socket *sock, unsigned char *buffer, size_t amount) {
+	size_t total = 0;
+	ssize_t read;
+
+	assert(sock != NULL);
+	assert(buffer != NULL);
+	assert(amount > 0);
+
+	while(total < amount) {
+		read = ss_internal_recv(sock->socket, buffer, amount, MSG_WAITALL);
+
+		if(read <= 0)
+			return SS_ERROR_DISCONNECT;
+
+		total += read;
+	}
+
+	return SS_SUCCESS;
+}
+
+
+ss_error receive_message(secure_socket *sock, unsigned char **buffer_ptr, size_t buffer_max) {
+	uint32_t net_length, length;
+	ss_error error;
+
+	assert(sock != NULL);
+	assert(buffer_ptr != NULL);
+	assert(*buffer_ptr != NULL || (buffer_max == 0 && *buffer_ptr == NULL));
+	assert(buffer_max == 0 || buffer_max >= MESSAGE_HEADER_LENGTH);
+
+	error = receive_exact(sock, (unsigned char*)&net_length, sizeof net_length);
+
+	if(error)
+		return error;
+
+	length = ntohl(net_length);
+
+	if(length <= sizeof length)
+		return SS_ERROR_INVALID_RESPONSE;
+
+	// TODO: check for too large of a message?
+	if(buffer_max > 0 && buffer_max < length)
+		return SS_ERROR_BUFFER_TOO_SMALL;
+
+	if(!*buffer_ptr) {
+		*buffer_ptr = ss_malloc(length);
+		if(!*buffer_ptr)
+			return SS_ERROR_OUT_OF_MEMORY;
+	}
+
+	error = receive_exact(sock, *buffer_ptr + sizeof length, length - sizeof length);
+	*((uint32_t*)*buffer_ptr) = net_length;
+
+	if(error && buffer_max == 0) {
+		ss_malloc_free(*buffer_ptr);
+		*buffer_ptr = NULL;
+		return error;
+	}
+
+	return SS_SUCCESS;
 }
 

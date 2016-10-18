@@ -41,6 +41,9 @@ int (*ss_internal_close)(int) = close;
 int (*ss_internal_socket)(int, int, int) = socket;
 int (*ss_internal_connect)(int, const struct sockaddr *, socklen_t) = connect;
 
+ssize_t (*ss_internal_send)(int, const void *, size_t, int) = send;
+ssize_t (*ss_internal_recv)(int, void *, size_t, int) = recv;
+
 int (*ss_getaddrinfo)(const char *, const char *, const struct addrinfo *, struct addrinfo **) = getaddrinfo;
 void (*ss_freeaddrinfo)(struct addrinfo *) = freeaddrinfo;
 
@@ -194,6 +197,9 @@ size_t pack_hello(unsigned char *output, const handshake_hello *hello) {
 	if(fields & PROVIDED_MASTER_PUBLIC_KEY)
 		binary_write(&ptr, hello->master_public_key, sizeof hello->master_public_key);
 
+	if(fields & PROVIDED_MAX_MESSAGE_LENGTH)
+		uint32_write(&ptr, hello->max_message_length);
+
 	if(fields & PROVIDED_NONCE_LENGTH)
 		uint32_write(&ptr, hello->nonce_length);
 
@@ -232,19 +238,27 @@ ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const
 
 	if(fields & PROVIDED_VERSION)
 		invalid_length |= uint32_read(&hello->version, input, end_ptr);
+	else
+		hello->version = 1;
 
 	if(fields & PROVIDED_MIN_VERSION) {
 		invalid_length |= uint32_read(&hello->min_version, input, end_ptr);
 
 		if(!invalid_length && hello->min_version > 1)
 			return STATUS_ERROR | STATUS_VERSION_TOO_HIGH;
+	} else {
+		hello->min_version = 1;
 	}
 
 	if(fields & PROVIDED_SESSION_TOKEN_TIMEOUT)
 		invalid_length |= uint32_read(&hello->token_timeout_seconds, input, end_ptr);
+	else
+		hello->token_timeout_seconds = 0; //1800;
 
 	if(fields & PROVIDED_SESSION_TOKEN_LENGTH)
 		invalid_length |= uint32_read(&hello->session_token_length, input, end_ptr);
+	else
+		hello->session_token_length = 0; //sizeof hello->session_token;
 
 	if(fields & PROVIDED_SESSION_TOKEN)
 		invalid_length |= binary_read(hello->session_token, input, end_ptr, sizeof hello->session_token);
@@ -254,6 +268,8 @@ ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const
 
 		if(!invalid_length && hello->ephemeral_key_length != sizeof hello->ephemeral_public_key)
 			return error | STATUS_ERROR | STATUS_INVALID_EPHEMERAL_KEY_LENGTH;
+	} else {
+		hello->ephemeral_key_length = sizeof hello->ephemeral_public_key;
 	}
 
 	if(fields & PROVIDED_EPHEMERAL_PUBLIC_KEY)
@@ -264,16 +280,28 @@ ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const
 
 		if(!invalid_length && hello->master_key_length != sizeof hello->master_public_key)
 			return error | STATUS_ERROR | STATUS_INVALID_MASTER_KEY_LENGTH;
-	}
+	} else {
+		hello->master_key_length = sizeof hello->master_public_key;
 
 	if(fields & PROVIDED_MASTER_PUBLIC_KEY)
 		invalid_length |= binary_read(hello->master_public_key, input, end_ptr, sizeof hello->master_public_key);
+
+	if(fields & PROVIDED_MAX_MESSAGE_LENGTH) {
+		invalid_length |= uint32_read(&hello->max_message_length, input, end_ptr);
+
+		if(!invalid_length && (hello->max_message_length < 256 || hello->max_message_length > 100000))
+			error |= STATUS_ERROR | STATUS_INVALID_MAX_MESSAGE_LENGTH;
+	} else {
+		hello->max_message_length = 10000;
+	}
 
 	if(fields & PROVIDED_NONCE_LENGTH) {
 		invalid_length |= uint32_read(&hello->nonce_length, input, end_ptr);
 
 		if(!invalid_length && hello->nonce_length != NONCE_LENGTH)
 			error |= STATUS_ERROR | STATUS_INVALID_NONCE_LENGTH;
+	} else {
+		hello->nonce_length = NONCE_LENGTH;
 	}
 
 	if(fields & PROVIDED_SIGNATURE_LENGTH) {
@@ -281,6 +309,8 @@ ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const
 
 		if(!invalid_length && hello->signature_length != SIGNATURE_LENGTH)
 			error |= STATUS_ERROR | STATUS_INVALID_SIGNATURE_LENGTH;
+	} else {
+		hello->signature_length = SIGNATURE_LENGTH;
 	}
 
 	if(fields & PROVIDED_TAG_LENGTH) {
@@ -288,6 +318,8 @@ ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const
 
 		if(!invalid_length && hello->tag_length != TAG_LENGTH)
 			error |= STATUS_ERROR | STATUS_INVALID_TAG_LENGTH;
+	} else {
+		hello->tag_length = TAG_LENGTH;
 	}
 
 	if(invalid_length)

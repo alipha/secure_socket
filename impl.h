@@ -12,15 +12,17 @@
 #define PROVIDED_SESSION_TOKEN_TIMEOUT      0x00000004U
 #define PROVIDED_SESSION_TOKEN_LENGTH       0x00000008U
 #define PROVIDED_SESSION_TOKEN              0x00000010U
-#define PROVIDED_EPHEMERAL_KEY_LENGTH       0x00000020U
-#define PROVIDED_EPHEMERAL_KEY_ID           0x00000040U
-#define PROVIDED_EPHEMERAL_PUBLIC_KEY       0x00000080U
-#define PROVIDED_MASTER_KEY_LENGTH          0x00000100U
-#define PROVIDED_MASTER_PUBLIC_KEY          0x00000200U
-#define PROVIDED_NONCE_LENGTH               0x00000400U
-#define PROVIDED_NONCE                      0x00000800U
-#define PROVIDED_SIGNATURE_LENGTH           0x00001000U
-#define PROVIDED_TAG_LENGTH                 0x00002000U
+#define PROVIDED_MESSAGE_ID                 0x00000020U
+#define PROVIDED_EPHEMERAL_KEY_LENGTH       0x00000040U
+#define PROVIDED_EPHEMERAL_KEY_ID           0x00000080U
+#define PROVIDED_EPHEMERAL_PUBLIC_KEY       0x00000100U
+#define PROVIDED_MASTER_KEY_LENGTH          0x00000200U
+#define PROVIDED_MASTER_PUBLIC_KEY          0x00000400U
+#define PROVIDED_MAX_MESSAGE_LENGTH         0x00000800U
+#define PROVIDED_NONCE_LENGTH               0x00001000U
+#define PROVIDED_NONCE                      0x00002000U
+#define PROVIDED_SIGNATURE_LENGTH           0x00004000U
+#define PROVIDED_TAG_LENGTH                 0x00008000U
 #define PROVIDED_SIGNATURE                  0x40000000U
 #define PROVIDED_TAG                        0x80000000U
 
@@ -35,16 +37,18 @@
 #define STATUS_UNKNOWN_SESSION_TOKEN        0x00000100U
 #define STATUS_INVALID_EPHEMERAL_KEY_LENGTH 0x00000200U
 #define STATUS_INVALID_MASTER_KEY_LENGTH    0x00000400U
-#define STATUS_INVALID_NONCE_LENGTH         0x00000800U
-#define STATUS_INVALID_SIGNATURE_LENGTH     0x00001000U
-#define STATUS_INVALID_TAG_LENGTH           0x00002000U
-#define STATUS_INVALID_SIGNATURE            0x00004000U
-#define STATUS_INVALID_MASTER_KEY_TAG       0x00008000U
-#define STATUS_INVALID_TAG                  0x00010000U
-#define STATUS_INVALID_NONCE                0x00020000U
-#define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00040000U
+#define STATUS_INVALID_MAX_MESSAGE_LENGTH   0x00000800U
+#define STATUS_INVALID_NONCE_LENGTH         0x00001000U
+#define STATUS_INVALID_SIGNATURE_LENGTH     0x00002000U
+#define STATUS_INVALID_TAG_LENGTH           0x00004000U
+#define STATUS_INVALID_SIGNATURE            0x00008000U
+#define STATUS_INVALID_MASTER_KEY_TAG       0x00010000U
+#define STATUS_INVALID_TAG                  0x00020000U
+#define STATUS_INVALID_NONCE                0x00040000U
+#define STATUS_UNKNOWN_MASTER_PUBLIC_KEY    0x00080000U
 
 #define MESSAGE_HEADER_LENGTH               (4 * sizeof(uint32_t))
+#define MAX_HELLO_LENGTH                    10000U
 #define COMBINED_KEY_LENGTH					(SS_PUBLIC_KEY_LENGTH + SS_PRIVATE_KEY_LENGTH) 
 #define EPHEMERAL_PUBLIC_KEY_LENGTH         32U
 #define EPHEMERAL_PRIVATE_KEY_LENGTH        32U
@@ -92,6 +96,7 @@ typedef struct handshake_hello {
 	char ephemeral_public_key[EPHEMERAL_PUBLIC_KEY_LENGTH];
 	uint32_t master_key_length;
 	char master_public_key[SS_PUBLIC_KEY_LENGTH];
+	uint32_t max_message_length;
 	uint32_t nonce_length;
 	uint32_t signature_length;
 	uint32_t tag_length;
@@ -108,6 +113,7 @@ typedef struct handshake_finish {
 
 typedef struct message_frame {
 	message_header header;
+	uint32_t message_id;
 	char nonce[NONCE_LENGTH];	// client starts even, server starts odd, increment by 2
 	uint32_t ephemeral_key_id;
 	char new_ephemeral_public_key[EPHEMERAL_PUBLIC_KEY_LENGTH];
@@ -121,6 +127,8 @@ struct secure_socket {
 	time_t connected_time;
 	handshake_hello my_hello;
 	handshake_hello their_hello;
+	unsigned char my_packed_hello[sizeof(handshake_hello)]; // TODO: calculate exact size?
+	unsigned char their_packed_hello[MAX_HELLO_LENGTH];
 	unsigned char shared_key[SS_SHARED_KEY_LENGTH];
 	unsigned char master_private_key[SS_PRIVATE_KEY_LENGTH];
 	unsigned char *their_public_keys;
@@ -152,6 +160,9 @@ extern int (*ss_internal_close)(int);
 extern int (*ss_internal_socket)(int, int, int);
 extern int (*ss_internal_connect)(int, const struct sockaddr *, socklen_t);
 
+extern ssize_t (*ss_internal_send)(int, const void *, size_t, int);
+extern ssize_t (*ss_internal_recv)(int, void *, size_t, int);
+
 extern int (*ss_getaddrinfo)(const char *, const char *, const struct addrinfo *, struct addrinfo**);
 extern void (*ss_freeaddrinfo)(struct addrinfo *);
 
@@ -172,5 +183,8 @@ ss_error unpack_header(message_header *header, const unsigned char **input);
 
 size_t pack_hello(unsigned char *output, const handshake_hello *hello);
 ss_error unpack_hello(handshake_hello *hello, const unsigned char **input, const unsigned char *end_ptr);
+
+size_t pack_finish(unsigned char *output, const handshake_finish *finish);
+ss_error unpack_finish(handshake_finish *finish, const unsigned char **input);
 
 #endif
